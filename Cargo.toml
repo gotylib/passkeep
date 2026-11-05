@@ -1,0 +1,36 @@
+[package]
+name = "passkeep"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Minimal local password manager"
+publish = false
+
+[dependencies]
+aes-gcm = "0.10"
+argon2 = "0.5"
+eframe = "0.33.3"
+rand = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zeroize = { version = "1", features = ["derive"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(not(windows))'.dependencies]
+arboard = "3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

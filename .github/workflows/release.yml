@@ -1,0 +1,116 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            binary: target/release/passkeep.exe
+            asset: passkeep-windows-x64.exe
+          - name: Linux
+            os: ubuntu-latest
+            binary: target/release/passkeep
+            asset: passkeep-linux-x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Stage
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "${{ matrix.binary }}" "dist/${{ matrix.asset }}"
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            chmod +x "dist/${{ matrix.asset }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    name: Publish
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Version
+        id: version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}-build.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Notes
+        run: |
+          cat > notes.md << 'EOF'
+          Windows: passkeep-windows-x64.exe
+          Linux x64: passkeep-linux-x64
+
+          On Linux, allow the file to run with: chmod +x passkeep-linux-x64
+          EOF
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: passkeep ${{ steps.version.outputs.version }} (build ${{ github.run_number }})
+          body_path: notes.md
+          files: |
+            dist/passkeep-windows-x64.exe
+            dist/passkeep-linux-x64
+          make_latest: true
+          fail_on_unmatched_files: true
