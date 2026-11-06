@@ -4,5 +4,5 @@
 
 Каждый пуш в `main` собирает новую версию: [Releases](https://github.com/gotylib/passkeep/releases).
 
-- Windows: `passkeep-windows-x64.exe`
+- Windows: `passkeep-windows-setup.exe` ставит программу в меню Пуск и в список приложений
 - Linux x64: `passkeep-linux-x64` (`chmod +x passkeep-linux-x64`)

@@ -16,8 +16,28 @@ use zeroize::Zeroize;
 use vault::Vault;
 
 const CLIPBOARD_TTL: Duration = Duration::from_secs(30);
+const APP_USER_MODEL_ID: &str = "gotylib.passkeep";
+
+#[cfg(windows)]
+fn set_app_user_model_id() {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+
+    let wide: Vec<u16> = OsStr::new(APP_USER_MODEL_ID)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        SetCurrentProcessExplicitAppUserModelID(wide.as_ptr());
+    }
+}
 
 fn main() -> eframe::Result<()> {
+    #[cfg(windows)]
+    set_app_user_model_id();
+
     let viewport = egui::ViewportBuilder::default()
         .with_title("passkeep")
         .with_inner_size([440.0, 680.0])

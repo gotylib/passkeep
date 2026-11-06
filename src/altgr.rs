@@ -77,7 +77,16 @@ mod windows {
         Instead(String),
     }
 
+    #[cfg(test)]
+    thread_local! {
+        static FORCED_ALTGR: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    }
+
     fn special_character(key: egui::Key, shift: bool) -> Option<String> {
+        #[cfg(test)]
+        if let Some(text) = FORCED_ALTGR.with(|slot| slot.borrow().clone()) {
+            return Some(text);
+        }
         let vk = virtual_key(key)?;
         let layout = unsafe { GetKeyboardLayout(0) };
         let with_altgr = translate(vk, &chord(vk, shift, true), layout)?;
@@ -199,30 +208,45 @@ mod windows {
 
     #[cfg(test)]
     mod tests {
-        use super::{recover, virtual_key};
+        use super::{recover, virtual_key, FORCED_ALTGR};
         use eframe::egui::{Event, Key, Modifiers, RawInput};
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-            ActivateKeyboardLayout, GetKeyboardLayout, LoadKeyboardLayoutW, KLF_ACTIVATE,
-            KLF_NOTELLSHELL,
+            ActivateKeyboardLayout, GetKeyboardLayout, LoadKeyboardLayoutW, UnloadKeyboardLayout,
+            KLF_ACTIVATE, KLF_NOTELLSHELL,
         };
 
-        struct LayoutGuard(windows_sys::Win32::UI::Input::KeyboardAndMouse::HKL);
+        struct LayoutGuard {
+            previous: windows_sys::Win32::UI::Input::KeyboardAndMouse::HKL,
+            loaded: windows_sys::Win32::UI::Input::KeyboardAndMouse::HKL,
+        }
 
         impl Drop for LayoutGuard {
             fn drop(&mut self) {
                 unsafe {
-                    ActivateKeyboardLayout(self.0, KLF_NOTELLSHELL);
+                    ActivateKeyboardLayout(self.previous, KLF_NOTELLSHELL);
+                    UnloadKeyboardLayout(self.loaded);
                 }
             }
         }
 
+        /// Only for CI. Loading a layout here adds it to the signed-in Windows
+        /// session, which is why extra layouts showed up in the switcher.
         fn use_layout(klid: &str) -> LayoutGuard {
+            assert_eq!(
+                std::env::var("PASSKEEP_LAYOUT_TESTS").ok().as_deref(),
+                Some("1"),
+                "refusing to load {klid} into the Windows session"
+            );
             let previous = unsafe { GetKeyboardLayout(0) };
             let wide: Vec<u16> = klid.encode_utf16().chain(std::iter::once(0)).collect();
             let loaded =
                 unsafe { LoadKeyboardLayoutW(wide.as_ptr(), KLF_ACTIVATE | KLF_NOTELLSHELL) };
             assert!(!loaded.is_null(), "keyboard layout {klid} did not load");
-            LayoutGuard(previous)
+            LayoutGuard { previous, loaded }
+        }
+
+        fn layout_tests_enabled() -> bool {
+            std::env::var("PASSKEEP_LAYOUT_TESTS").ok().as_deref() == Some("1")
         }
 
         fn altgr_key(key: Key, shift: bool) -> Event {
@@ -243,6 +267,9 @@ mod windows {
 
         #[test]
         fn german_altgr_q_is_inserted_as_at() {
+            if !layout_tests_enabled() {
+                return;
+            }
             let _guard = use_layout("00000407");
             let mut raw = RawInput::default();
             raw.events.push(altgr_key(Key::Q, false));
@@ -263,6 +290,9 @@ mod windows {
 
         #[test]
         fn spanish_altgr_2_is_inserted_as_at() {
+            if !layout_tests_enabled() {
+                return;
+            }
             let _guard = use_layout("0000040A");
             let mut raw = RawInput::default();
             raw.events.push(altgr_key(Key::Num2, false));
@@ -296,8 +326,30 @@ mod windows {
         }
 
         #[test]
+        fn altgr_text_is_inserted_without_loading_a_layout() {
+            FORCED_ALTGR.with(|slot| *slot.borrow_mut() = Some("@".to_string()));
+            struct Clear;
+            impl Drop for Clear {
+                fn drop(&mut self) {
+                    FORCED_ALTGR.with(|slot| *slot.borrow_mut() = None);
+                }
+            }
+            let _clear = Clear;
+            let mut raw = RawInput::default();
+            raw.events.push(altgr_key(Key::Q, false));
+            recover(&mut raw);
+            assert!(matches!(raw.events.get(1), Some(Event::Text(text)) if text == "@"));
+            match &raw.events[0] {
+                Event::Key { modifiers, .. } => {
+                    assert!(!modifiers.ctrl);
+                    assert!(!modifiers.command);
+                }
+                other => panic!("expected the key event, got {other:?}"),
+            }
+        }
+
+        #[test]
         fn released_altgr_key_is_not_rewritten() {
-            let _guard = use_layout("00000407");
             let mut raw = RawInput::default();
             raw.events.push(Event::Key {
                 key: Key::Q,

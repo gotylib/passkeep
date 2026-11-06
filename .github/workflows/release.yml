@@ -54,6 +54,8 @@ jobs:
 
       - name: Test
         run: cargo test --locked
+        env:
+          PASSKEEP_LAYOUT_TESTS: ${{ runner.os == 'Windows' && '1' || '0' }}
 
       - name: Build
         run: cargo build --release --locked
@@ -67,10 +69,31 @@ jobs:
             chmod +x "dist/${{ matrix.asset }}"
           fi
 
+      - name: Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $setup)) {
+            $installer = Join-Path $env:RUNNER_TEMP "innosetup.exe"
+            Invoke-WebRequest -Uri "https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe" -OutFile $installer
+            Start-Process $installer -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-" -Wait
+          }
+          & $setup "packaging\passkeep.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item "target\release\passkeep-windows-setup.exe" "dist\passkeep-windows-setup.exe"
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
           path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: passkeep-windows-setup.exe
+          path: dist/passkeep-windows-setup.exe
           if-no-files-found: error
 
   release:
@@ -98,7 +121,8 @@ jobs:
       - name: Notes
         run: |
           cat > notes.md << 'EOF'
-          Windows: passkeep-windows-x64.exe
+          Windows installer: passkeep-windows-setup.exe
+          Windows program only: passkeep-windows-x64.exe
           Linux x64: passkeep-linux-x64
 
           On Linux, allow the file to run with: chmod +x passkeep-linux-x64
@@ -110,6 +134,7 @@ jobs:
           name: passkeep ${{ steps.version.outputs.version }} (build ${{ github.run_number }})
           body_path: notes.md
           files: |
+            dist/passkeep-windows-setup.exe
             dist/passkeep-windows-x64.exe
             dist/passkeep-linux-x64
           make_latest: true
