@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use eframe::egui;
+use egui_phosphor::regular as icon;
 use zeroize::Zeroize;
 
 use super::{App, Form, LockState, Notice, OpenState, Phase, UnlockStep, CLIPBOARD_TTL};
@@ -288,7 +289,12 @@ fn open_screen(open: &mut OpenState, ctx: &egui::Context) -> Action {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("passkeep").size(22.0).color(TEXT));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if action_button(ui, "lock").clicked() {
+                    if open.form.is_none()
+                        && icon_button(ui, "New entry", false, false, icon::PLUS).clicked()
+                    {
+                        start_new = true;
+                    }
+                    if icon_button(ui, "Lock", false, false, icon::LOCK).clicked() {
                         lock_clicked = true;
                     }
                 });
@@ -305,8 +311,6 @@ fn open_screen(open: &mut OpenState, ctx: &egui::Context) -> Action {
             if let Some(form) = open.form.as_mut() {
                 form_action = form_editor(ui, form);
                 ui.add_space(8.0);
-            } else if wide_button(ui, "new entry").clicked() {
-                start_new = true;
             }
 
             ui.add_space(4.0);
@@ -521,7 +525,13 @@ fn labeled_edit(
 fn name_search(ui: &mut egui::Ui, value: &mut String) -> egui::Response {
     let response = ui.add(text_field_margin(value, "search by name", false, 38));
     let center = response.rect.left_center() + egui::vec2(20.0, 0.0);
-    paint_search(ui.painter(), center, MUTED);
+    ui.painter().text(
+        center,
+        egui::Align2::CENTER_CENTER,
+        icon::MAGNIFYING_GLASS,
+        egui::FontId::proportional(16.0),
+        MUTED,
+    );
     response
 }
 
@@ -549,15 +559,6 @@ fn text_field_margin<'a>(
         })
         .vertical_align(egui::Align::Center)
         .min_size(egui::vec2(0.0, FIELD_H))
-}
-
-fn paint_search(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32) {
-    let stroke = egui::Stroke::new(1.6, color);
-    painter.circle_stroke(center + egui::vec2(-1.5, -1.5), 5.0, stroke);
-    painter.line_segment(
-        [center + egui::vec2(2.0, 2.0), center + egui::vec2(6.4, 6.4)],
-        stroke,
-    );
 }
 
 fn wide_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
@@ -600,18 +601,15 @@ fn entry_card(ui: &mut egui::Ui, entry: &Entry, revealed: bool, armed: bool) -> 
             } else {
                 "Show password"
             };
-            if icon_button(ui, show_tip, false, |painter, center, color, _fill| {
-                paint_eye(painter, center, color, revealed);
-            })
-            .clicked()
-            {
+            let eye = if revealed { icon::EYE_SLASH } else { icon::EYE };
+            if icon_button(ui, show_tip, false, false, eye).clicked() {
                 action = Some(CardAction::ToggleReveal);
             }
-            if icon_button(ui, "Edit", false, paint_pencil).clicked() {
+            if icon_button(ui, "Edit", false, false, icon::PENCIL_SIMPLE).clicked() {
                 action = Some(CardAction::Edit);
             }
             let delete_tip = if armed { "Delete?" } else { "Delete" };
-            if icon_button(ui, delete_tip, armed, paint_trash).clicked() {
+            if icon_button(ui, delete_tip, armed, true, icon::TRASH).clicked() {
                 action = Some(CardAction::Delete);
             }
         });
@@ -629,7 +627,7 @@ fn copy_row(ui: &mut egui::Ui, name: &str, value: &str, mask: bool) -> bool {
         ));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if !value.is_empty()
-                && icon_button(ui, &format!("Copy {name}"), false, paint_copy_icon).clicked()
+                && icon_button(ui, &format!("Copy {name}"), false, false, icon::COPY).clicked()
             {
                 copied = true;
             }
@@ -663,7 +661,7 @@ fn site_row(ui: &mut egui::Ui, url: &str) -> bool {
             egui::RichText::new("site").size(14.0).color(MUTED),
         ));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if icon_button(ui, "Open site", false, paint_open_site).clicked() {
+            if icon_button(ui, "Open site", false, false, icon::ARROW_SQUARE_OUT).clicked() {
                 open = true;
             }
             ui.add(
@@ -691,7 +689,8 @@ fn icon_button(
     ui: &mut egui::Ui,
     tooltip: &str,
     armed: bool,
-    paint: impl FnOnce(&egui::Painter, egui::Pos2, egui::Color32, egui::Color32),
+    danger: bool,
+    glyph: &str,
 ) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(COPY_BTN, COPY_BTN), egui::Sense::click());
@@ -717,144 +716,21 @@ fn icon_button(
         stroke,
         egui::StrokeKind::Inside,
     );
-    let color = if hovered && !armed {
+    let color = if danger {
+        DANGER
+    } else if hovered && !armed {
         egui::Color32::WHITE
     } else {
         TEXT
     };
-    paint(ui.painter(), rect.center(), color, fill);
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        glyph,
+        egui::FontId::proportional(18.0),
+        color,
+    );
     response.on_hover_text(tooltip)
-}
-
-fn paint_eye(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32, slashed: bool) {
-    let stroke = egui::Stroke::new(1.7, color);
-    painter.add(egui::Shape::ellipse_stroke(
-        center,
-        egui::vec2(7.4, 4.6),
-        stroke,
-    ));
-    painter.circle_filled(center, 1.8, color);
-    if slashed {
-        painter.line_segment(
-            [
-                center + egui::vec2(-8.2, 6.2),
-                center + egui::vec2(8.2, -6.2),
-            ],
-            egui::Stroke::new(1.7, color),
-        );
-    }
-}
-
-fn paint_pencil(
-    painter: &egui::Painter,
-    center: egui::Pos2,
-    color: egui::Color32,
-    fill: egui::Color32,
-) {
-    let body = vec![
-        center + egui::vec2(5.6, -7.4),
-        center + egui::vec2(7.6, -5.4),
-        center + egui::vec2(-4.4, 6.4),
-        center + egui::vec2(-6.4, 4.4),
-    ];
-    let tip = vec![
-        center + egui::vec2(-6.4, 4.4),
-        center + egui::vec2(-4.4, 6.4),
-        center + egui::vec2(-8.0, 8.0),
-    ];
-    painter.add(egui::Shape::convex_polygon(body, color, egui::Stroke::NONE));
-    painter.add(egui::Shape::convex_polygon(tip, color, egui::Stroke::NONE));
-    painter.line_segment(
-        [
-            center + egui::vec2(2.4, -4.4),
-            center + egui::vec2(4.6, -2.2),
-        ],
-        egui::Stroke::new(1.7, fill),
-    );
-}
-
-fn paint_trash(
-    painter: &egui::Painter,
-    center: egui::Pos2,
-    _color: egui::Color32,
-    _fill: egui::Color32,
-) {
-    let stroke = egui::Stroke::new(1.7, DANGER);
-    painter.line_segment(
-        [
-            center + egui::vec2(-6.4, -3.6),
-            center + egui::vec2(6.4, -3.6),
-        ],
-        stroke,
-    );
-    painter.rect_stroke(
-        egui::Rect::from_center_size(center + egui::vec2(0.0, -5.8), egui::vec2(4.4, 2.6)),
-        egui::CornerRadius::same(1),
-        stroke,
-        egui::StrokeKind::Inside,
-    );
-    painter.rect_stroke(
-        egui::Rect::from_min_size(center + egui::vec2(-5.2, -2.4), egui::vec2(10.4, 9.4)),
-        egui::CornerRadius::same(2),
-        stroke,
-        egui::StrokeKind::Inside,
-    );
-    painter.line_segment(
-        [
-            center + egui::vec2(-2.2, -0.4),
-            center + egui::vec2(-2.2, 4.8),
-        ],
-        stroke,
-    );
-    painter.line_segment(
-        [
-            center + egui::vec2(2.2, -0.4),
-            center + egui::vec2(2.2, 4.8),
-        ],
-        stroke,
-    );
-}
-
-fn paint_copy_icon(
-    painter: &egui::Painter,
-    center: egui::Pos2,
-    color: egui::Color32,
-    fill: egui::Color32,
-) {
-    let stroke = egui::Stroke::new(1.6, color);
-    let size = egui::vec2(11.0, 11.0);
-    let radius = egui::CornerRadius::same(2);
-    let back = egui::Rect::from_min_size(center + egui::vec2(-7.0, -7.0), size);
-    let front = egui::Rect::from_min_size(center + egui::vec2(-3.5, -3.5), size);
-    painter.rect_stroke(back, radius, stroke, egui::StrokeKind::Inside);
-    painter.rect(front, radius, fill, stroke, egui::StrokeKind::Inside);
-}
-
-fn paint_open_site(
-    painter: &egui::Painter,
-    center: egui::Pos2,
-    color: egui::Color32,
-    _fill: egui::Color32,
-) {
-    let stroke = egui::Stroke::new(1.6, color);
-    let left = center.x - 6.0;
-    let right = center.x + 2.5;
-    let top = center.y - 1.5;
-    let bottom = center.y + 7.0;
-    painter.line_segment([egui::pos2(left, top), egui::pos2(left, bottom)], stroke);
-    painter.line_segment(
-        [egui::pos2(left, bottom), egui::pos2(right, bottom)],
-        stroke,
-    );
-    painter.line_segment(
-        [egui::pos2(right, bottom), egui::pos2(right, top + 3.5)],
-        stroke,
-    );
-    painter.line_segment([egui::pos2(left, top), egui::pos2(left + 4.0, top)], stroke);
-    let tip = center + egui::vec2(6.5, -6.5);
-    painter.line_segment([center + egui::vec2(0.5, -0.5), tip], stroke);
-    painter.line_segment([tip, tip + egui::vec2(-4.6, 0.2)], stroke);
-    painter.line_segment([tip, tip + egui::vec2(-0.2, 4.6)], stroke);
 }
 
 fn validate_form(form: &Form) -> Option<String> {
@@ -1018,6 +894,7 @@ fn card_frame() -> egui::Frame {
 
 fn install_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
+    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
     if let Some(segoe) = load_font(r"C:\Windows\Fonts\segoeui.ttf") {
         fonts.font_data.insert("segoe".to_owned(), segoe);
         fonts
